@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.PendingIntent
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.nfc.NfcAdapter
 import android.nfc.Tag
@@ -12,6 +13,7 @@ import android.os.Bundle
 import android.view.Gravity
 import android.view.View
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.activity.result.ActivityResultLauncher
@@ -31,7 +33,9 @@ import com.google.android.material.snackbar.Snackbar
 import com.google.mlkit.vision.barcode.BarcodeScanning
 import com.google.mlkit.vision.barcode.common.Barcode
 import com.google.mlkit.vision.common.InputImage
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import retrofit2.Response
 import java.io.IOException
 import java.util.Locale
@@ -358,11 +362,30 @@ class MainActivity : AppCompatActivity() {
         val rows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
         }
+
+        val photoView = ImageView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                dpToPx(100),
+                dpToPx(100)
+            ).apply {
+                bottomMargin = dpToPx(16)
+                gravity = Gravity.CENTER_HORIZONTAL
+            }
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            setImageResource(R.drawable.ic_avatar_placeholder)
+            contentDescription = "Credential photo"
+        }
+        rows.addView(photoView)
         rows.addView(fieldRow("Course", credential.course))
         rows.addView(fieldRow("University", credential.university))
         rows.addView(fieldRow("Duration", credential.duration))
         rows.addView(fieldRow("Class", credential.`class`))
         card.addView(rows)
+
+        if (!credential.id.isNullOrBlank()) {
+            loadCredentialPhoto(credential.id, photoView)
+        }
+
         return card
     }
 
@@ -406,5 +429,34 @@ class MainActivity : AppCompatActivity() {
             text = textValue
             setOnClickListener { action() }
         }
+    }
+
+    private fun loadCredentialPhoto(id: String, imageView: ImageView) {
+        lifecycleScope.launch {
+            try {
+                val response = withContext(Dispatchers.IO) {
+                    ApiClient.credentialApi.getPhoto(id)
+                }
+                if (response.isSuccessful && response.body() != null) {
+                    val bytes = withContext(Dispatchers.IO) {
+                        response.body()!!.bytes()
+                    }
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap != null) {
+                        imageView.setImageBitmap(bitmap)
+                    } else {
+                        imageView.setImageResource(R.drawable.ic_avatar_placeholder)
+                    }
+                } else {
+                    imageView.setImageResource(R.drawable.ic_avatar_placeholder)
+                }
+            } catch (exception: Exception) {
+                imageView.setImageResource(R.drawable.ic_avatar_placeholder)
+            }
+        }
+    }
+
+    private fun dpToPx(dp: Int): Int {
+        return (dp * resources.displayMetrics.density).toInt()
     }
 }

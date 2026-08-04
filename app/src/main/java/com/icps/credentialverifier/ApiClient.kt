@@ -1,5 +1,6 @@
 package com.icps.credentialverifier
 
+import okhttp3.ResponseBody
 import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -14,7 +15,8 @@ data class CredentialResponseDto(
     val course: String,
     val university: String,
     val duration: String,
-    val `class`: String
+    val `class`: String,
+    val has_photo: Boolean = false
 )
 
 interface CredentialApi {
@@ -23,6 +25,9 @@ interface CredentialApi {
 
     @GET("credentials/by-chip/{chipUid}")
     suspend fun getByChipUid(@Path("chipUid") chipUid: String): Response<CredentialResponseDto>
+
+    @GET("credentials/{id}/photo")
+    suspend fun getPhoto(@Path("id") id: String): Response<ResponseBody>
 }
 
 object ApiClient {
