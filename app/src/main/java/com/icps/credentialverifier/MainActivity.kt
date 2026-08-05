@@ -1,5 +1,7 @@
 package com.icps.credentialverifier
 
+import com.icps.credentialverifier.BuildConfig
+
 import android.Manifest
 import android.app.PendingIntent
 import android.content.Intent
@@ -131,9 +133,18 @@ class MainActivity : AppCompatActivity() {
             setPadding(24)
             layoutParams = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT
+            )
+        }
+
+        val scrollContainer = android.widget.ScrollView(this).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
                 0,
                 0.9f
             )
+            isFillViewport = true
+            addView(contentPanel)
         }
 
         statusText = TextView(this).apply {
@@ -142,7 +153,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         root.addView(previewView)
-        root.addView(contentPanel)
+        root.addView(scrollContainer)
         setContentView(root)
         showScanState()
     }
@@ -359,28 +370,41 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        val rows = LinearLayout(this).apply {
+        val contentContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+
+        val textRows = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(
+                0,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                1f
+            )
         }
 
         val photoView = ImageView(this).apply {
             layoutParams = LinearLayout.LayoutParams(
-                dpToPx(100),
-                dpToPx(100)
+                dpToPx(96),
+                dpToPx(96)
             ).apply {
-                bottomMargin = dpToPx(16)
-                gravity = Gravity.CENTER_HORIZONTAL
+                marginStart = dpToPx(16)
+                gravity = Gravity.CENTER_VERTICAL
             }
             scaleType = ImageView.ScaleType.CENTER_CROP
             setImageResource(R.drawable.ic_avatar_placeholder)
             contentDescription = "Credential photo"
         }
-        rows.addView(photoView)
-        rows.addView(fieldRow("Course", credential.course))
-        rows.addView(fieldRow("University", credential.university))
-        rows.addView(fieldRow("Duration", credential.duration))
-        rows.addView(fieldRow("Class", credential.`class`))
-        card.addView(rows)
+
+        textRows.addView(fieldRow("Course", credential.course))
+        textRows.addView(fieldRow("University", credential.university))
+        textRows.addView(fieldRow("Duration", credential.duration))
+        textRows.addView(fieldRow("Class", credential.`class`))
+
+        contentContainer.addView(textRows)
+        contentContainer.addView(photoView)
+        card.addView(contentContainer)
 
         if (!credential.id.isNullOrBlank()) {
             loadCredentialPhoto(credential.id, photoView)
