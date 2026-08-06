@@ -267,7 +267,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val response = request()
                 when {
-                    response.isSuccessful && response.body() != null -> showResult(response.body()!!)
+                    response.isSuccessful && response.body() != null -> showResult(response.body()!!, isOffline = false)
                     response.code() == 404 -> showNotFound()
                     else -> showNetworkError(
                         title = "Couldn't reach the server",
@@ -275,9 +275,10 @@ class MainActivity : AppCompatActivity() {
                     )
                 }
             } catch (exception: IOException) {
+                val isOfflineError = exception is java.net.UnknownHostException || exception is java.net.ConnectException
                 showNetworkError(
-                    title = "Couldn't reach the server",
-                    detail = exception.localizedMessage ?: "Check that the API is running at ${BuildConfig.API_BASE_URL}."
+                    title = if (isOfflineError) "No Internet Connection" else "Couldn't reach the server",
+                    detail = if (isOfflineError) "Please check your internet connection and try again." else (exception.localizedMessage ?: "Check that the API is running at ${BuildConfig.API_BASE_URL}.")
                 )
             } catch (exception: RuntimeException) {
                 showNetworkError(
@@ -301,10 +302,81 @@ class MainActivity : AppCompatActivity() {
             @Suppress("DEPRECATION")
             intent.getParcelableExtra(NfcAdapter.EXTRA_TAG)
         } ?: return
+        
         val chipUid = tag.id.joinToString(separator = "") { byte ->
             String.format(Locale.US, "%02X", byte)
         }
-        lookupByChipUid(chipUid)
+
+        val mifare = android.nfc.tech.MifareClassic.get(tag)
+        if (mifare != null) {
+            readOfflinePayload(mifare, chipUid)
+        } else {
+            showNetworkError(
+                title = "Incompatible NFC Tag",
+                detail = "This device/tag does not support reading MIFARE Classic offline payloads."
+            )
+        }
+    }
+
+    private fun readOfflinePayload(mifare: android.nfc.tech.MifareClassic, chipUid: String) {
+        lookupInProgress = true
+        scanInputActive = false
+        showLoading("Reading secure NFC chip...")
+
+        lifecycleScope.launch(Dispatchers.IO) {
+            try {
+                mifare.connect()
+                var rawPayloadBytes = ByteArray(0)
+
+                // Read sectors 1 to 15
+                val sectorCount = mifare.sectorCount
+                for (sector in 1 until Math.min(16, sectorCount)) {
+                    val auth = try {
+                        mifare.authenticateSectorWithKeyA(sector, CryptoUtils.MIFARE_CUSTOM_KEY_A)
+                    } catch (e: IOException) {
+                        false // Some devices throw IOException on auth failure instead of returning false
+                    }
+                    
+                    if (!auth) {
+                        break // End of written data or wrong key
+                    }
+                    val blockCount = mifare.getBlockCountInSector(sector)
+                    val firstBlock = mifare.sectorToBlock(sector)
+
+                    // Read all data blocks in sector (skip sector trailer which is the last block)
+                    for (i in 0 until blockCount - 1) {
+                        val data = mifare.readBlock(firstBlock + i)
+                        rawPayloadBytes += data
+                    }
+                }
+                
+                try {
+                    mifare.close()
+                } catch (e: Exception) {
+                    // Ignore close exceptions
+                }
+
+                if (rawPayloadBytes.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        showNotFound()
+                        lookupInProgress = false
+                    }
+                    return@launch
+                }
+
+                val json = CryptoUtils.decryptAndVerify(rawPayloadBytes, chipUid)
+                val credential = com.google.gson.Gson().fromJson(json, CredentialResponseDto::class.java)
+
+                withContext(Dispatchers.Main) {
+                    showResult(credential, isOffline = true)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    showNetworkError("NFC Read Error", e.message ?: "Failed to read the secure payload from the chip.")
+                    lookupInProgress = false
+                }
+            }
+        }
     }
 
     private fun updateNfcStatus() {
@@ -325,11 +397,21 @@ class MainActivity : AppCompatActivity() {
         contentPanel.addView(bodyText("Looking up the credential record..."))
     }
 
-    private fun showResult(credential: CredentialResponseDto) {
+    private fun showResult(credential: CredentialResponseDto, isOffline: Boolean) {
         scanInputActive = false
         contentPanel.removeAllViews()
         contentPanel.addView(headerText("${credential.first_name} ${credential.last_name}"))
-        contentPanel.addView(detailCard(credential))
+        
+        val sourceText = if (isOffline) "✓ Verified via secure NFC chip" else "✓ Verified online via network"
+        val statusTextView = TextView(this).apply {
+            text = sourceText
+            textSize = 14f
+            setTextColor(Color.rgb(46, 125, 50)) // Green
+            setPadding(0, 0, 0, 16)
+        }
+        contentPanel.addView(statusTextView)
+        
+        contentPanel.addView(detailCard(credential, isOffline, statusTextView))
         contentPanel.addView(actionButton("Verify another") { showScanState() })
     }
 
@@ -355,7 +437,7 @@ class MainActivity : AppCompatActivity() {
         contentPanel.addView(actionButton("Scan another") { showScanState() })
     }
 
-    private fun detailCard(credential: CredentialResponseDto): MaterialCardView {
+    private fun detailCard(credential: CredentialResponseDto, isOffline: Boolean, statusTextView: TextView): MaterialCardView {
         val card = MaterialCardView(this).apply {
             radius = 8f
             strokeWidth = 1
@@ -407,7 +489,7 @@ class MainActivity : AppCompatActivity() {
         card.addView(contentContainer)
 
         if (!credential.id.isNullOrBlank()) {
-            loadCredentialPhoto(credential.id, photoView)
+            loadCredentialPhoto(credential.id, photoView, isOffline, statusTextView)
         }
 
         return card
@@ -455,7 +537,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadCredentialPhoto(id: String, imageView: ImageView) {
+    private fun loadCredentialPhoto(id: String, imageView: ImageView, isOffline: Boolean, statusTextView: TextView) {
         lifecycleScope.launch {
             try {
                 val response = withContext(Dispatchers.IO) {
@@ -470,12 +552,21 @@ class MainActivity : AppCompatActivity() {
                         imageView.setImageBitmap(bitmap)
                     } else {
                         imageView.setImageResource(R.drawable.ic_avatar_placeholder)
+                        if (isOffline) {
+                            statusTextView.text = "✓ Verified offline via secure NFC chip. Connect to internet to see photo."
+                        }
                     }
                 } else {
                     imageView.setImageResource(R.drawable.ic_avatar_placeholder)
+                    if (isOffline) {
+                        statusTextView.text = "✓ Verified offline via secure NFC chip. Connect to internet to see photo."
+                    }
                 }
             } catch (exception: Exception) {
                 imageView.setImageResource(R.drawable.ic_avatar_placeholder)
+                if (isOffline) {
+                    statusTextView.text = "✓ Verified offline via secure NFC chip. Connect to internet to see photo."
+                }
             }
         }
     }
