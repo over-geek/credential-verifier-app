@@ -30,9 +30,8 @@ object CryptoUtils {
         kf.generatePublic(X509EncodedKeySpec(Base64.decode(ED25519_PUBLIC_B64, Base64.DEFAULT)))
     }
 
-    /**
-     * Signature is computed over: [chipUidBytes] + [IV] + [Ciphertext + Tag]. that's how we get the signature :)
-     */
+
+    // Signature is computed over: [chipUidBytes] + [IV] + [Ciphertext + Tag]. that's how we get the signature :)
     fun decryptAndVerify(rawPayload: ByteArray, chipUid: String): String {
         if (rawPayload.size < 4) {
             throw Exception("Payload too small to contain length header.")
