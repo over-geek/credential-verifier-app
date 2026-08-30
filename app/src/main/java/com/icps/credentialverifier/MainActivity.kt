@@ -229,23 +229,16 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val qrToken = QrPayloadParser.parseToken(payload)
-        if (qrToken == null) {
+        val credential = QrPayloadParser.parseOfflineQr(payload)
+        if (credential == null) {
             runOnUiThread {
-                Snackbar.make(previewView, "This QR code is not a credential verification code.", Snackbar.LENGTH_SHORT).show()
+                Snackbar.make(previewView, "This QR code is not a credential verification code or is invalid.", Snackbar.LENGTH_SHORT).show()
             }
             return
         }
 
         runOnUiThread {
-            lookupByQrToken(qrToken)
-        }
-    }
-
-    private fun lookupByQrToken(qrToken: String) {
-        lastLookup = { lookupByQrToken(qrToken) }
-        performLookup("Checking QR credential...") {
-            ApiClient.credentialApi.getByQrToken(qrToken)
+            showResult(credential, offlineSource = "QR code")
         }
     }
 
@@ -267,7 +260,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val response = request()
                 when {
-                    response.isSuccessful && response.body() != null -> showResult(response.body()!!, isOffline = false)
+                    response.isSuccessful && response.body() != null -> showResult(response.body()!!)
                     response.code() == 404 -> showNotFound()
                     else -> showNetworkError(
                         title = "Couldn't reach the server",
@@ -368,7 +361,7 @@ class MainActivity : AppCompatActivity() {
                 val credential = com.google.gson.Gson().fromJson(json, CredentialResponseDto::class.java)
 
                 withContext(Dispatchers.Main) {
-                    showResult(credential, isOffline = true)
+                    showResult(credential, offlineSource = "secure NFC chip")
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
@@ -397,12 +390,13 @@ class MainActivity : AppCompatActivity() {
         contentPanel.addView(bodyText("Looking up the credential record..."))
     }
 
-    private fun showResult(credential: CredentialResponseDto, isOffline: Boolean) {
+    private fun showResult(credential: CredentialResponseDto, offlineSource: String? = null) {
         scanInputActive = false
         contentPanel.removeAllViews()
         contentPanel.addView(headerText("${credential.first_name} ${credential.last_name}"))
         
-        val sourceText = if (isOffline) "✓ Verified via secure NFC chip" else "✓ Verified online via network"
+        val isOffline = offlineSource != null
+        val sourceText = if (isOffline) "✓ Verified via $offlineSource" else "✓ Verified online via network"
         val statusTextView = TextView(this).apply {
             text = sourceText
             textSize = 14f
@@ -411,7 +405,7 @@ class MainActivity : AppCompatActivity() {
         }
         contentPanel.addView(statusTextView)
         
-        contentPanel.addView(detailCard(credential, isOffline, statusTextView))
+        contentPanel.addView(detailCard(credential, isOffline, offlineSource, statusTextView))
         contentPanel.addView(actionButton("Verify another") { showScanState() })
     }
 
@@ -437,7 +431,7 @@ class MainActivity : AppCompatActivity() {
         contentPanel.addView(actionButton("Scan another") { showScanState() })
     }
 
-    private fun detailCard(credential: CredentialResponseDto, isOffline: Boolean, statusTextView: TextView): MaterialCardView {
+    private fun detailCard(credential: CredentialResponseDto, isOffline: Boolean, offlineSource: String?, statusTextView: TextView): MaterialCardView {
         val card = MaterialCardView(this).apply {
             radius = 8f
             strokeWidth = 1
@@ -489,7 +483,7 @@ class MainActivity : AppCompatActivity() {
         card.addView(contentContainer)
 
         if (!credential.id.isNullOrBlank()) {
-            loadCredentialPhoto(credential.id, photoView, isOffline, statusTextView)
+            loadCredentialPhoto(credential.id, photoView, isOffline, offlineSource, statusTextView)
         }
 
         return card
@@ -537,7 +531,7 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun loadCredentialPhoto(id: String, imageView: ImageView, isOffline: Boolean, statusTextView: TextView) {
+    private fun loadCredentialPhoto(id: String, imageView: ImageView, isOffline: Boolean, offlineSource: String?, statusTextView: TextView) {
         lifecycleScope.launch {
             try {
                 val response = withContext(Dispatchers.IO) {
@@ -553,19 +547,19 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         imageView.setImageResource(R.drawable.ic_avatar_placeholder)
                         if (isOffline) {
-                            statusTextView.text = "✓ Verified offline via secure NFC chip. Connect to internet to see photo."
+                            statusTextView.text = "✓ Verified offline via $offlineSource. Connect to internet to see photo."
                         }
                     }
                 } else {
                     imageView.setImageResource(R.drawable.ic_avatar_placeholder)
                     if (isOffline) {
-                        statusTextView.text = "✓ Verified offline via secure NFC chip. Connect to internet to see photo."
+                        statusTextView.text = "✓ Verified offline via $offlineSource. Connect to internet to see photo."
                     }
                 }
             } catch (exception: Exception) {
                 imageView.setImageResource(R.drawable.ic_avatar_placeholder)
                 if (isOffline) {
-                    statusTextView.text = "✓ Verified offline via secure NFC chip. Connect to internet to see photo."
+                    statusTextView.text = "✓ Verified offline via $offlineSource. Connect to internet to see photo."
                 }
             }
         }

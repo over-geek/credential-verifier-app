@@ -69,4 +69,16 @@ object CryptoUtils {
         val plaintext = cipher.doFinal(ciphertext)
         return String(plaintext, Charsets.UTF_8)
     }
+
+    fun verifyQrSignature(dataJson: String, signatureB64: String): Boolean {
+        return try {
+            val signature = Base64.decode(signatureB64, Base64.DEFAULT)
+            val sig = Signature.getInstance("Ed25519")
+            sig.initVerify(publicKey)
+            sig.update(dataJson.toByteArray(Charsets.UTF_8))
+            sig.verify(signature)
+        } catch (e: Exception) {
+            false
+        }
+    }
 }
